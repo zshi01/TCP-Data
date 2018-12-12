@@ -20,7 +20,7 @@ public class client3 {
 	(new InputStreamReader(sock.getInputStream()));
       PrintWriter out = new PrintWriter(sock.getOutputStream(), true);
 
-      out.println("111112222233333");
+      out.println("hello");
       System.out.println("sent hello");
 
       String reply = in.readLine();
@@ -31,18 +31,18 @@ public class client3 {
 
       reply = in.readLine();
       System.out.println("final: "+reply);
-//
-//      for(int i=0;i<250;i++)
-//	out.println(i);
-//
-//      for(int i=0;i<250;i++){
-//	int num = Integer.parseInt(in.readLine().trim());
-//	if(num!= i)
-//	  System.err.println("error: "+i+" != "+num);
-//      }
+
+      for(int i=0;i<25;i++)
+	out.println(i);
+
+      for(int i=0;i<25;i++){
+	int num = Integer.parseInt(in.readLine().trim());
+	if(num!= i)
+	  System.err.println("error: "+i+" != "+num);
+      }
       
       
-//      sock.close();
+      sock.close();
       
     }
     catch(Exception e){

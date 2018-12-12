@@ -36,8 +36,8 @@ class StudentSocketImpl extends BaseSocketImpl {
   private static final int LAST_ACK = 9;
   private static final int TIME_WAIT = 10;
 
-  private static final int DATA_LENGTH = 5;
-  private static final int WINDOW_SIZE = 2;
+  private static final int DATA_LENGTH = 1000;
+  private static final int WINDOW_SIZE = 10;
 
   private PipedOutputStream appOS;
   private PipedInputStream appIS;
@@ -176,7 +176,7 @@ class StudentSocketImpl extends BaseSocketImpl {
   }
 
   private synchronized void incrementCounters(TCPPacket p){
-    ackNum = p.seqNum + 10;
+    ackNum = p.seqNum + 20;
 
     if(p.ackNum != -1)
       seqNum = p.ackNum;
@@ -246,6 +246,7 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   synchronized void dataFromApp(byte[] buffer, int length){
     sending = true;
+    notifyAll();
 
     //get evertyhing from app onto the sendBuffer
     sendBuffer.append(buffer,0,length);
@@ -403,7 +404,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
         incrementCounters(p);
         TCPPacket synackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, true, false, 1, null);
-        seqNum += 10;
+        seqNum += 20;
         changeToState(SYN_RCVD);
         sendPacket(synackPacket, false);
       }
@@ -463,9 +464,9 @@ class StudentSocketImpl extends BaseSocketImpl {
         terminating =true;
       }
       //debug purpose, print out recvBuffer
-      byte recvbuffer[] = new byte[50];
-      recvBuffer.copyOut(recvbuffer, recvBuffer.getBase(), recvBuffer.getNext()-recvBuffer.getBase());
-      String msg = new String(recvbuffer,StandardCharsets.UTF_8);
+      byte localBuffer[] = new byte[DATA_LENGTH];
+      recvBuffer.copyOut(localBuffer, recvBuffer.getBase(), recvBuffer.getNext()-recvBuffer.getBase());
+      String msg = new String(localBuffer,StandardCharsets.UTF_8);
       System.out.println("msg: " + msg);
     }
   }
@@ -534,7 +535,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
     terminating = true;
 
-    while(!reader.tryClose()){
+    while(!reader.tryClose() || sending){
       notifyAll();
       try{
         wait(1000);
@@ -551,6 +552,7 @@ class StudentSocketImpl extends BaseSocketImpl {
       //client state
       TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, 1, null);
       changeToState(FIN_WAIT_1);
+      seqNum += 20;
       sendPacket(finPacket, false);
       finSent = true;
     }
@@ -558,6 +560,7 @@ class StudentSocketImpl extends BaseSocketImpl {
       //server state
       TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, 1, null);
       changeToState(LAST_ACK);
+      seqNum += 20;
       sendPacket(finPacket, false);
       finSent = true;
     }

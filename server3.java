@@ -42,8 +42,8 @@ public class server3 {
 //      for(int i=0;i<250;i++)
 //	out.println(i);
 //
-//      connSock.close();
-//      sock.close();
+      connSock.close();
+      sock.close();
 
     }
     catch(Exception e){
