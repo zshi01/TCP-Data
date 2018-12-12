@@ -36,7 +36,8 @@ class StudentSocketImpl extends BaseSocketImpl {
   private static final int LAST_ACK = 9;
   private static final int TIME_WAIT = 10;
 
-  private static final int DATA_LENGTH = 4;
+  private static final int DATA_LENGTH = 5;
+  private static final int WINDOW_SIZE = 2;
 
   private PipedOutputStream appOS;
   private PipedInputStream appIS;
@@ -48,6 +49,7 @@ class StudentSocketImpl extends BaseSocketImpl {
   private SocketWriter writer;
 
   private boolean terminating = false;
+  private boolean sending = false;
 
   private InfiniteBuffer sendBuffer;
   private InfiniteBuffer recvBuffer;
@@ -140,7 +142,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   private synchronized void sendPacket(TCPPacket inPacket, boolean resend){
     if(inPacket.ackFlag && !inPacket.synFlag){
-      inPacket.seqNum = -2;
+      inPacket.seqNum = -1;
     }
 
     if(!resend){ //new timer, and requires the current state as a key
@@ -187,11 +189,11 @@ class StudentSocketImpl extends BaseSocketImpl {
     while(keyList.hasMoreElements()){
       Integer currKey = (Integer)keyList.nextElement();
       if(currKey< receivePacketAck){
+        System.out.println("cancel time seqNum" + currKey);
         timerList.get(currKey).cancel();
         timerList.remove(currKey);
         packetList.remove(currKey);
       }
-      else{ break; }
     }
   }
 
@@ -213,7 +215,26 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @return number of bytes copied (by definition > 0)
    */
   synchronized int getData(byte[] buffer, int length){
-    return 0;
+    int lengthToCopy = 0;
+    if(!terminating){
+      try {
+        wait();
+      }catch (InterruptedException e){
+        System.err.println(e); }
+    } else {
+      //notifyAll();
+      lengthToCopy = recvBuffer.getNext() - recvBuffer.getBase();
+      byte[] data = new byte[length];
+      if(length < lengthToCopy ){
+        lengthToCopy = length;
+      }
+      recvBuffer.copyOut(buffer,recvBuffer.getBase(),lengthToCopy);
+      recvBuffer.advance(lengthToCopy);
+      terminating = false;
+//      System.out.println("Buffer content:    " + new String(buffer,StandardCharsets.UTF_8));
+    }
+
+    return lengthToCopy;
 
   }
 
@@ -224,6 +245,7 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @param length number of bytes to copy
    */
   synchronized void dataFromApp(byte[] buffer, int length){
+    sending = true;
 
     //get evertyhing from app onto the sendBuffer
     sendBuffer.append(buffer,0,length);
@@ -237,6 +259,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
 
     //called sendData()
+
     sendData(length);
 
   }
@@ -257,6 +280,15 @@ class StudentSocketImpl extends BaseSocketImpl {
       String str = new String(data,StandardCharsets.UTF_8);
       System.out.println(str);
 
+      System.out.println("packet size: " +packetList.size());
+      while (packetList.size() >= WINDOW_SIZE){
+        System.out.println("wait packet size: " +packetList.size());
+        try {
+          wait();
+        }catch (InterruptedException e){
+          System.err.println(e); }
+      }
+      System.out.println("send packet size: " +packetList.size());
       TCPPacket dataPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, false, 1, data);
       sendPacket(dataPacket, false);
       seqNum += data.length;
@@ -346,6 +378,12 @@ class StudentSocketImpl extends BaseSocketImpl {
         cancelPacketTimer();
         changeToState(TIME_WAIT);
       }
+      else if(state == ESTABLISHED){
+        cancelPacketTimer();
+        if (packetList.size() == 0){
+          sending = false;
+        }
+      }
     }
     else if(p.synFlag == true){
       System.out.println("a syn.");
@@ -365,6 +403,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
         incrementCounters(p);
         TCPPacket synackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, true, false, 1, null);
+        seqNum += 10;
         changeToState(SYN_RCVD);
         sendPacket(synackPacket, false);
       }
@@ -412,6 +451,22 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
     else{
       System.out.println("a chunk of data.");
+      byte data[] = p.getData();
+      String str = new String(data,StandardCharsets.UTF_8);
+      System.out.println(str);
+      if (p.seqNum == ackNum){
+        System.out.println("get data, send ack");
+        recvBuffer.append(data, 0, data.length);
+        ackNum = p.seqNum + data.length;
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        sendPacket(ackPacket, false);
+        terminating =true;
+      }
+      //debug purpose, print out recvBuffer
+      byte recvbuffer[] = new byte[50];
+      recvBuffer.copyOut(recvbuffer, recvBuffer.getBase(), recvBuffer.getNext()-recvBuffer.getBase());
+      String msg = new String(recvbuffer,StandardCharsets.UTF_8);
+      System.out.println("msg: " + msg);
     }
   }
 

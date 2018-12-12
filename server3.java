@@ -33,17 +33,17 @@ public class server3 {
       out.println("great.  good bye!");
       System.out.println("sent goodbye");
 
-      for(int i=0;i<250;i++){
-	int num = Integer.parseInt(in.readLine().trim());
-	if(num!= i)
-	  System.err.println("error: "+i+" != "+num);
-      }
-
-      for(int i=0;i<250;i++)
-	out.println(i);
-
-      connSock.close();
-      sock.close();
+//      for(int i=0;i<250;i++){
+//	int num = Integer.parseInt(in.readLine().trim());
+//	if(num!= i)
+//	  System.err.println("error: "+i+" != "+num);
+//      }
+//
+//      for(int i=0;i<250;i++)
+//	out.println(i);
+//
+//      connSock.close();
+//      sock.close();
 
     }
     catch(Exception e){
