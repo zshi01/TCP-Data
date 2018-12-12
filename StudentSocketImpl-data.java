@@ -1,5 +1,8 @@
+import java.lang.reflect.Array;
 import java.net.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 import java.util.Timer;
 
 class StudentSocketImpl extends BaseSocketImpl {
@@ -15,8 +18,8 @@ class StudentSocketImpl extends BaseSocketImpl {
   private int state;
   private int seqNum;
   private int ackNum;
-  private Hashtable<Integer, TCPTimerTask> timerList; //holds the timers for sent packets
-  private Hashtable<Integer, TCPPacket> packetList;	  //holds the packets associated with each timer
+  private Hashtable<Integer, TCPTimerTask> timerList; //holds the timers for sent packets, int is the seqNum of packet
+  private Hashtable<Integer, TCPPacket> packetList;	  //holds the packets associated with each timer, int is the seqNum of packet
   //(for timer identification)
   private boolean wantsToClose = false;
   private boolean finSent = false;
@@ -33,6 +36,8 @@ class StudentSocketImpl extends BaseSocketImpl {
   private static final int LAST_ACK = 9;
   private static final int TIME_WAIT = 10;
 
+  private static final int DATA_LENGTH = 4;
+
   private PipedOutputStream appOS;
   private PipedInputStream appIS;
 
@@ -47,6 +52,8 @@ class StudentSocketImpl extends BaseSocketImpl {
   private InfiniteBuffer sendBuffer;
   private InfiniteBuffer recvBuffer;
 
+  private int receivePacketAck;
+
 
   StudentSocketImpl(Demultiplexer D) {  // default constructor
     this.D = D;
@@ -59,7 +66,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     try {
       pipeAppToSocket = new PipedInputStream();
       pipeSocketToApp = new PipedOutputStream();
-      
+
       appIS = new PipedInputStream(pipeSocketToApp);
       appOS = new PipedOutputStream(pipeAppToSocket);
     }
@@ -132,29 +139,29 @@ class StudentSocketImpl extends BaseSocketImpl {
   }
 
   private synchronized void sendPacket(TCPPacket inPacket, boolean resend){
-    if(inPacket.ackFlag == true && inPacket.synFlag == false){
+    if(inPacket.ackFlag && !inPacket.synFlag){
       inPacket.seqNum = -2;
     }
 
-    if(resend == false){ //new timer, and requires the current state as a key
+    if(!resend){ //new timer, and requires the current state as a key
       TCPWrapper.send(inPacket, address);
 
-      //only do timers for syns, syn-acks, and fins
-      if(inPacket.synFlag == true || inPacket.finFlag == true){
-        System.out.println("Creating new TimerTask at state " + stateString(state));
-        timerList.put(new Integer(state),createTimerTask(1000, inPacket));
-        packetList.put(new Integer(state), inPacket);
+      //only do timers for syns, syn-acks, and fins AND DATA
+      if(inPacket.synFlag || inPacket.finFlag || (!inPacket.ackFlag &&!inPacket.synFlag&&!inPacket.finFlag)){
+        System.out.println("Creating new TimerTask at seqNum " + inPacket.seqNum);
+        timerList.put(inPacket.seqNum, createTimerTask(1000, inPacket));
+        packetList.put(inPacket.seqNum, inPacket);
       }
     }
     else{ //the packet is for resending, and requires the original state as the key
       Enumeration keyList = timerList.keys();
-      Integer currKey = new Integer(-1);
+      Integer currKey;
       try{
         for(int i = 0; i<10; i++){
           currKey = (Integer)keyList.nextElement();
 
           if(packetList.get(currKey) == inPacket){
-            System.out.println("Recreating TimerTask from state " + stateString(currKey));
+            System.out.println("Recreating TimerTask from state " + currKey);
             TCPWrapper.send(inPacket, address);
             timerList.put(currKey,createTimerTask(1000, inPacket));
             break;
@@ -167,26 +174,24 @@ class StudentSocketImpl extends BaseSocketImpl {
   }
 
   private synchronized void incrementCounters(TCPPacket p){
-    ackNum = p.seqNum + 1;
+    ackNum = p.seqNum + 10;
 
     if(p.ackNum != -1)
       seqNum = p.ackNum;
+
   }
 
   private synchronized void cancelPacketTimer(){
     //must be called before changeToState is called!!!
-
-    if(state != CLOSING){
-      timerList.get(state).cancel();
-      timerList.remove(state);
-      packetList.remove(state);
-    }
-    else{
-      //the only time the state changes before an ack is received... so it must
-      //look back to where the fin timer started
-      timerList.get(FIN_WAIT_1).cancel();
-      timerList.remove(FIN_WAIT_1);
-      packetList.remove(FIN_WAIT_1);
+    Enumeration keyList = timerList.keys();
+    while(keyList.hasMoreElements()){
+      Integer currKey = (Integer)keyList.nextElement();
+      if(currKey< receivePacketAck){
+        timerList.get(currKey).cancel();
+        timerList.remove(currKey);
+        packetList.remove(currKey);
+      }
+      else{ break; }
     }
   }
 
@@ -194,10 +199,13 @@ class StudentSocketImpl extends BaseSocketImpl {
    * initialize buffers and set up sequence numbers
    */
   private void initBuffers(){
+    //initialize buffers
+    sendBuffer = new InfiniteBuffer();
+    recvBuffer = new InfiniteBuffer();
   }
 
   /**
-   * Called by the application-layer code to copy data out of the 
+   * Called by the application-layer code to copy data out of the
    * recvBuffer into the application's space.
    * Must block until data is available, or until terminating is true
    * @param buffer array of bytes to return to application
@@ -205,15 +213,57 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @return number of bytes copied (by definition > 0)
    */
   synchronized int getData(byte[] buffer, int length){
+    return 0;
+
   }
 
   /**
    * accept data written by application into sendBuffer to send.
    * Must block until ALL data is written.
    * @param buffer array of bytes to copy into app
-   * @param length number of bytes to copy 
+   * @param length number of bytes to copy
    */
   synchronized void dataFromApp(byte[] buffer, int length){
+
+    //get evertyhing from app onto the sendBuffer
+    sendBuffer.append(buffer,0,length);
+
+    while (state != ESTABLISHED){
+      try {
+        wait();
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
+
+    //called sendData()
+    sendData(length);
+
+  }
+
+
+  synchronized void sendData(int length){
+    byte dataToSend[] = new byte[length];
+    byte data[];
+    sendBuffer.copyOut(dataToSend, sendBuffer.getBase(), length);
+    sendBuffer.advance(length);
+    int numPakcet = (int)Math.ceil((double)length/DATA_LENGTH);
+    for (int i=0; i<numPakcet;i++){
+      if (i != numPakcet-1){
+        data = Arrays.copyOfRange(dataToSend, i*DATA_LENGTH, (i+1)*DATA_LENGTH);
+      } else{
+        data = Arrays.copyOfRange(dataToSend, i*DATA_LENGTH, dataToSend.length);
+      }
+      String str = new String(data,StandardCharsets.UTF_8);
+      System.out.println(str);
+
+      TCPPacket dataPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, false, 1, data);
+      sendPacket(dataPacket, false);
+      seqNum += data.length;
+    }
+
+
+    System.out.println(Arrays.toString(dataToSend));
   }
 
 
@@ -239,15 +289,15 @@ class StudentSocketImpl extends BaseSocketImpl {
     changeToState(SYN_SENT);
     sendPacket(synPacket, false);
   }
-  
+
   /**
    * Called by Demultiplexer when a packet comes in for this connection
    * @param p The packet that arrived
    */
   public synchronized void receivePacket(TCPPacket p){
     this.notifyAll();
-
-    System.out.println("Packet received from address " + p.sourceAddr + " with seqNum " + p.seqNum + " is being processed.");
+    receivePacketAck = p.ackNum;
+    System.out.println("Packet received from address " + p.sourceAddr + " with seqNum " + p.seqNum + " ackNum" + p.ackNum +  " is being processed.");
     System.out.print("The packet is ");
 
     if(p.ackFlag == true && p.synFlag == true){
@@ -364,11 +414,11 @@ class StudentSocketImpl extends BaseSocketImpl {
       System.out.println("a chunk of data.");
     }
   }
-  
-  /** 
+
+  /**
    * Waits for an incoming connection to arrive to connect this socket to
-   * Ultimately this is called by the application calling 
-   * ServerSocket.accept(), but this method belongs to the Socket object 
+   * Ultimately this is called by the application calling
+   * ServerSocket.accept(), but this method belongs to the Socket object
    * that will be returned, not the listening ServerSocket.
    * Note that localport is already set prior to this being called.
    */
@@ -388,10 +438,10 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
   }
 
-  
+
   /**
    * Returns an input stream for this socket.  Note that this method cannot
-   * create a NEW InputStream, but must return a reference to an 
+   * create a NEW InputStream, but must return a reference to an
    * existing InputStream (that you create elsewhere) because it may be
    * called more than once.
    *
@@ -405,7 +455,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   /**
    * Returns an output stream for this socket.  Note that this method cannot
-   * create a NEW InputStream, but must return a reference to an 
+   * create a NEW InputStream, but must return a reference to an
    * existing InputStream (that you create elsewhere) because it may be
    * called more than once.
    *
@@ -419,7 +469,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
 
   /**
-   * Closes this socket. 
+   * Closes this socket.
    *
    * @exception  IOException  if an I/O error occurs when closing this socket.
    */
@@ -432,12 +482,12 @@ class StudentSocketImpl extends BaseSocketImpl {
     while(!reader.tryClose()){
       notifyAll();
       try{
-	wait(1000);
+        wait(1000);
       }
       catch(InterruptedException e){}
     }
     writer.close();
-    
+
     notifyAll();
 
     System.out.println("*** close() was called by the application.");
@@ -463,7 +513,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
   }
 
-  /** 
+  /**
    * create TCPTimerTask instance, handling tcpTimer creation
    * @param delay time in milliseconds before call
    * @param ref generic reference to be returned to handleTimer
@@ -477,7 +527,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   /**
    * handle timer expiration (called by TCPTimerTask)
-   * @param ref Generic reference that can be used by the timer to return 
+   * @param ref Generic reference that can be used by the timer to return
    * information.
    */
   public synchronized void handleTimer(Object ref){

@@ -18,39 +18,40 @@ import java.net.*;
 //
 //---------------------------------------------------
 class TCPStart {
-    
+
   public final static String PORTRESOURCE = "UDPPORT";
   public final static String LOSSRATERESOURCE = "LOSSRATE";
 
   static public void start() {
 
     // check command line args
-    if (System.getProperty(PORTRESOURCE)==null) {
-      System.err.println("Must set "+PORTRESOURCE+" for UDP port to use with "+
-			 "-D"+PORTRESOURCE+"=<num>");
-      System.exit(1);
-    }        
+//    if (System.getProperty(PORTRESOURCE)==null) {
+//      System.err.println("Must set "+PORTRESOURCE+" for UDP port to use with "+
+//			 "-D"+PORTRESOURCE+"=<num>");
+//      System.exit(1);
+//    }
 
-        
+
     // this number will initialize what port # you want your UDP
     // wrapper to run on.
-    int portForUDP = Integer.parseInt(System.getProperty(PORTRESOURCE));
+//    int portForUDP = Integer.parseInt(System.getProperty(PORTRESOURCE));
+    int portForUDP = 8816;
 
-        
+
     // initialize TCPWrapper's port number for UDP wrapping
     TCPWrapper.setUDPPortNumber( portForUDP );
 
-        
+
     // initialize more TCPWrapper stuff here, if you want to test packet
     // dropping, or if you want to change the sending-rate limit
 
-        
+
     // create an instance of the Demultiplexer
     Demultiplexer D = new Demultiplexer( portForUDP );
 
     // create an instance of OUR SocketImplFactory
     StudentSocketImplFactory myFactory = new StudentSocketImplFactory(D);
-        
+
 
     // tell all Socket objects of this program to use OUR
     // implementation of SockImpl
@@ -66,13 +67,16 @@ class TCPStart {
     // start the demultiplexer
     D.start();
 
-    if (System.getProperty(LOSSRATERESOURCE)!=null) {
-      TCPWrapper.dropRandomPackets
-	(System.currentTimeMillis(),
-	 Double.parseDouble(System.getProperty(LOSSRATERESOURCE)));
-    }        
+//    if (System.getProperty(LOSSRATERESOURCE)!=null) {
+//      TCPWrapper.dropRandomPackets
+//	(System.currentTimeMillis(),
+//	 Double.parseDouble(System.getProperty(LOSSRATERESOURCE)));
+//    }
+    long seed = System.currentTimeMillis();
+//    seed = 1542485309542L;
+    System.out.println("Seed:"+seed);
+    TCPWrapper.dropRandomPackets(seed,0.0);
 
-        
+
   }
 }
-
