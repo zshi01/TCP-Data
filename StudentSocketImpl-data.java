@@ -37,7 +37,7 @@ class StudentSocketImpl extends BaseSocketImpl {
   private static final int TIME_WAIT = 10;
 
   private static final int DATA_LENGTH = 1000;
-  private static final int WINDOW_SIZE = 10;
+  private static final int WINDOW_SIZE = 8;
 
   private PipedOutputStream appOS;
   private PipedInputStream appIS;
@@ -159,11 +159,11 @@ class StudentSocketImpl extends BaseSocketImpl {
       Enumeration keyList = timerList.keys();
       Integer currKey;
       try{
-        for(int i = 0; i<10; i++){
+        for(int i = 0; i<WINDOW_SIZE; i++){
           currKey = (Integer)keyList.nextElement();
 
           if(packetList.get(currKey) == inPacket){
-            System.out.println("Recreating TimerTask from state " + currKey);
+            System.out.println("Recreating TimerTask from seqNum " + currKey);
             TCPWrapper.send(inPacket, address);
             timerList.put(currKey,createTimerTask(1000, inPacket));
             break;
@@ -279,7 +279,7 @@ class StudentSocketImpl extends BaseSocketImpl {
         data = Arrays.copyOfRange(dataToSend, i*DATA_LENGTH, dataToSend.length);
       }
       String str = new String(data,StandardCharsets.UTF_8);
-      System.out.println(str);
+      System.out.println("Send str: " + str);
 
       System.out.println("packet size: " +packetList.size());
       while (packetList.size() >= WINDOW_SIZE){
@@ -290,13 +290,12 @@ class StudentSocketImpl extends BaseSocketImpl {
           System.err.println(e); }
       }
       System.out.println("send packet size: " +packetList.size());
-      TCPPacket dataPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, false, 1, data);
+      TCPPacket dataPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, false, WINDOW_SIZE-packetList.size(), data);
       sendPacket(dataPacket, false);
       seqNum += data.length;
     }
 
-
-    System.out.println(Arrays.toString(dataToSend));
+    System.out.println("datatoSend: " + new String(dataToSend,StandardCharsets.UTF_8));
   }
 
 
@@ -318,7 +317,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     D.registerConnection(address, localport, port, this);
 
     seqNum = 100;
-    TCPPacket synPacket = new TCPPacket(localport, port, seqNum, ackNum, false, true, false, 1, null);
+    TCPPacket synPacket = new TCPPacket(localport, port, seqNum, ackNum, false, true, false, WINDOW_SIZE-packetList.size(), null);
     changeToState(SYN_SENT);
     sendPacket(synPacket, false);
   }
@@ -340,18 +339,18 @@ class StudentSocketImpl extends BaseSocketImpl {
         //client state
         incrementCounters(p);
         cancelPacketTimer();
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         changeToState(ESTABLISHED);
         sendPacket(ackPacket, false);
       }
       else if (state == ESTABLISHED){
         //client state, strange message due to packet loss
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
       }
       else if (state == FIN_WAIT_1){
         //client state, strange message due to packet loss
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
       }
     }
@@ -379,6 +378,13 @@ class StudentSocketImpl extends BaseSocketImpl {
         cancelPacketTimer();
         changeToState(TIME_WAIT);
       }
+      else if(state == CLOSE_WAIT){
+        //client or server state
+        cancelPacketTimer();
+        if (packetList.size() == 0){
+          sending = false;
+        }
+      }
       else if(state == ESTABLISHED){
         cancelPacketTimer();
         if (packetList.size() == 0){
@@ -403,7 +409,7 @@ class StudentSocketImpl extends BaseSocketImpl {
         this.port = p.sourcePort;
 
         incrementCounters(p);
-        TCPPacket synackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, true, false, 1, null);
+        TCPPacket synackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, true, false, WINDOW_SIZE-packetList.size(), null);
         seqNum += 20;
         changeToState(SYN_RCVD);
         sendPacket(synackPacket, false);
@@ -416,58 +422,63 @@ class StudentSocketImpl extends BaseSocketImpl {
       if(state == ESTABLISHED){
         //server state
         incrementCounters(p);
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         changeToState(CLOSE_WAIT);
         sendPacket(ackPacket, false);
       }
       else if(state == FIN_WAIT_1){
         //client state or server state
         incrementCounters(p);
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         changeToState(CLOSING);
         sendPacket(ackPacket, false);
       }
       else if(state == FIN_WAIT_2){
         //client state
         incrementCounters(p);
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         changeToState(TIME_WAIT);
         sendPacket(ackPacket, false);
       }
       else if(state == LAST_ACK){
         //server state, strange message due to packet loss
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
       }
       else if(state == CLOSING){
         //client or server state, strange message due to packet loss
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
       }
       else if(state == TIME_WAIT){
         //client or server state, strange message due to packet loss
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
       }
     }
     else{
       System.out.println("a chunk of data.");
       byte data[] = p.getData();
-      String str = new String(data,StandardCharsets.UTF_8);
-      System.out.println(str);
+//      String str = new String(data,StandardCharsets.UTF_8);
+//      System.out.println(str);
+//      System.out.println("p.seqNum: " + p.seqNum + " ackNum" + ackNum);
       if (p.seqNum == ackNum){
         System.out.println("get data, send ack");
         recvBuffer.append(data, 0, data.length);
         ackNum = p.seqNum + data.length;
-        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 1, null);
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
         sendPacket(ackPacket, false);
         terminating =true;
+      } else if (p.seqNum < ackNum){
+        TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, WINDOW_SIZE-packetList.size(), null);
+        sendPacket(ackPacket, false);
       }
+
       //debug purpose, print out recvBuffer
-      byte localBuffer[] = new byte[DATA_LENGTH];
-      recvBuffer.copyOut(localBuffer, recvBuffer.getBase(), recvBuffer.getNext()-recvBuffer.getBase());
-      String msg = new String(localBuffer,StandardCharsets.UTF_8);
-      System.out.println("msg: " + msg);
+//      byte localBuffer[] = new byte[DATA_LENGTH];
+//      recvBuffer.copyOut(localBuffer, recvBuffer.getBase(), recvBuffer.getNext()-recvBuffer.getBase());
+//      String msg = new String(localBuffer,StandardCharsets.UTF_8);
+//      System.out.println("msg: " + msg);
     }
   }
 
@@ -550,7 +561,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
     if(state == ESTABLISHED){
       //client state
-      TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, 1, null);
+      TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, WINDOW_SIZE-packetList.size(), null);
       changeToState(FIN_WAIT_1);
       seqNum += 20;
       sendPacket(finPacket, false);
@@ -558,7 +569,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     }
     else if(state == CLOSE_WAIT){
       //server state
-      TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, 1, null);
+      TCPPacket finPacket = new TCPPacket(localport, port, seqNum, ackNum, false, false, true, WINDOW_SIZE-packetList.size(), null);
       changeToState(LAST_ACK);
       seqNum += 20;
       sendPacket(finPacket, false);

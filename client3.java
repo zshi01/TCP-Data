@@ -32,10 +32,10 @@ public class client3 {
       reply = in.readLine();
       System.out.println("final: "+reply);
 
-      for(int i=0;i<25;i++)
+      for(int i=0;i<250;i++)
 	out.println(i);
 
-      for(int i=0;i<25;i++){
+      for(int i=0;i<250;i++){
 	int num = Integer.parseInt(in.readLine().trim());
 	if(num!= i)
 	  System.err.println("error: "+i+" != "+num);
